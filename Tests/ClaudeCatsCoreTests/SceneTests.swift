@@ -116,7 +116,7 @@ import Foundation
                     alert: alert(.permission, "Claude needs your permission to run Bash")),
             session("working", status: .busy, alert: alert(.idle)),
         ])
-        let waiting = l.cats.first { $0.label == "waiting" }!
+        let waiting = l.cats.first { $0.label == "some title" }!   // 알림 중엔 이름표가 제목
         #expect(waiting.pose == .alert && waiting.animated)
         #expect(waiting.bubbleStyle == .alert)
         #expect(waiting.bubble == "권한 요청: run Bash")     // 제목 대신 알림이 뜬다

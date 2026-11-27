@@ -33,6 +33,29 @@ final class AppController {
     init(collector: StateCollector, window: DesktopWindow) {
         self.collector = collector
         self.window = window
+        window.onCatClick = { [weak self] id in
+            // 새끼 고양이 id 는 "세션id/서브에이전트id" 다.
+            let sessionId = String(id.split(separator: "/").first ?? Substring(id))
+            guard let pid = self?.lastSnapshot?.sessions.first(where: { $0.id == sessionId })?.pid
+            else { return }
+            Self.focusTerminal(pid: pid)
+        }
+    }
+
+    /// 세션 프로세스의 tty 를 가진 Ghostty 터미널(탭·분할)로 이동한다.
+    /// shortcut: Ghostty 만 지원(AppleScript 의 terminal tty). 다른 터미널을 쓰면 여기에 분기를 더할 것.
+    private nonisolated static func focusTerminal(pid: Int32) {
+        let script = """
+        tty=$(ps -o tty= -p "$1" | tr -d ' ')
+        [ -n "$tty" ] && [ "$tty" != "??" ] || exit 0
+        osascript -e "tell application \\"Ghostty\\"" \\
+          -e "focus (first terminal whose tty is \\"/dev/$tty\\")" \\
+          -e "activate" -e "end tell"
+        """
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", script, "sh", String(pid)]
+        try? p.run()
     }
 
     deinit {

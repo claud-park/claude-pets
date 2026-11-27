@@ -5,6 +5,14 @@ import ClaudeCatsCore
 /// 화면 파라미터 알림 없이 스케일만 바뀌는 경우(창이 다른 배율 디스플레이로 옮겨감)를 잡는다.
 private final class DesktopContentView: NSView {
     var onBackingPropertiesChanged: (() -> Void)?
+    var onMouseDown: ((NSPoint) -> Void)?
+
+    // 앱이 비활성이어도 첫 클릭을 바로 받는다.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        onMouseDown?(convert(event.locationInWindow, from: nil))
+    }
 
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
@@ -22,6 +30,11 @@ final class DesktopWindow {
     private var layout = Layout(cats: [])
     private var tailTimer: DispatchSourceTimer?
     private var isRefitting = false
+
+    /// 고양이를 클릭하면 그 CatPlacement id 로 불린다.
+    var onCatClick: ((String) -> Void)?
+    private var mouseMonitor: Any?
+    private var hoverTimer: Timer?
 
     /// 사용자가 메뉴에서 고른 디스플레이 이름. nil 이면 메인 디스플레이(자동).
     private var preferredDisplayName: String?
@@ -90,6 +103,35 @@ final class DesktopWindow {
 
         // 모든 저장 프로퍼티가 채워진 뒤라야 self 를 캡처할 수 있다.
         contentView.onBackingPropertiesChanged = { [weak self] in self?.refitToScreen() }
+        contentView.onMouseDown = { [weak self] point in
+            guard let self, let id = self.catId(at: point) else { return }
+            self.onCatClick?(id)
+        }
+        // 평소엔 클릭이 뒤 창으로 통과하고, 커서가 고양이 위에 있을 때만 창이 클릭을 받는다.
+        // 다른 앱으로 가는 마우스 이동은 전역 모니터로 본다(마우스 이벤트라 손쉬운 사용 권한 불필요).
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateMousePassThrough() }
+        }
+    }
+
+    private func catId(at point: NSPoint) -> String? {
+        layers.first { $0.value.frame.contains(point) }?.key
+    }
+
+    /// 커서가 고양이 위면 클릭을 받고, 벗어나면 다시 통과시킨다. 창이 클릭을 받는 동안엔
+    /// 전역 모니터에 이동이 안 오므로 짧은 타이머로 벗어남을 확인한다.
+    private func updateMousePassThrough() {
+        let inWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        let overCat = catId(at: contentView.convert(inWindow, from: nil)) != nil
+        window.ignoresMouseEvents = !overCat
+        if overCat, hoverTimer == nil {
+            hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateMousePassThrough() }
+            }
+        } else if !overCat {
+            hoverTimer?.invalidate()
+            hoverTimer = nil
+        }
     }
 
     var screenSize: CGSize { window.frame.size }
@@ -104,7 +146,7 @@ final class DesktopWindow {
     func setPlacement(_ new: WindowPlacement) {
         guard new != placement else { return }
         placement = new
-        Self.apply(new, to: window)
+        applyEffectivePlacement()
     }
 
     /// 메뉴에서 `동물 종류` 를 고르면 호출된다. 창·레이아웃은 그대로 두고 각 고양이의 아트만
@@ -153,9 +195,19 @@ final class DesktopWindow {
         }
     }
 
+    /// 알림(내 입력이 필요한 세션)이 있으면 고른 위치와 상관없이 앞으로 나오고, 없으면 고른 위치로 돌아간다.
+    private var raisedForAttention = false
+    private func applyEffectivePlacement() {
+        raisedForAttention = layout.cats.contains { $0.pose == .alert }
+        Self.apply(raisedForAttention ? .alwaysOnTop : placement, to: window)
+    }
+
     func apply(_ new: Layout) {
         let diff = LayoutDiffer.diff(from: layout, to: new)
         layout = new
+        if layout.cats.contains(where: { $0.pose == .alert }) != raisedForAttention {
+            applyEffectivePlacement()
+        }
         guard !diff.isEmpty else { return }
 
         CATransaction.begin()
