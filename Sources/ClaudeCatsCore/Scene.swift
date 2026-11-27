@@ -95,7 +95,8 @@ public enum Scene {
             let bubble = session.alert.map(alertBubble) ?? title
             cats.append(CatPlacement(
                 id: session.id, origin: origin, scale: 1, pose: pose,
-                paletteIndex: paletteIndex, label: session.name,
+                // 알림이 말풍선의 제목을 가리므로, 그동안은 이름표 자리에 제목을 보여 준다.
+                paletteIndex: paletteIndex, label: session.alert != nil ? (title ?? session.name) : session.name,
                 animated: pose != .sleeping && animationsEnabled, overflowCount: 0,
                 bubble: bubble,
                 bubbleStyle: session.alert != nil ? .alert : .title
