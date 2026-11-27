@@ -104,7 +104,7 @@ final class DesktopWindow {
     func setPlacement(_ new: WindowPlacement) {
         guard new != placement else { return }
         placement = new
-        Self.apply(new, to: window)
+        applyEffectivePlacement()
     }
 
     /// 메뉴에서 `동물 종류` 를 고르면 호출된다. 창·레이아웃은 그대로 두고 각 고양이의 아트만
@@ -153,9 +153,19 @@ final class DesktopWindow {
         }
     }
 
+    /// 알림(내 입력이 필요한 세션)이 있으면 고른 위치와 상관없이 앞으로 나오고, 없으면 고른 위치로 돌아간다.
+    private var raisedForAttention = false
+    private func applyEffectivePlacement() {
+        raisedForAttention = layout.cats.contains { $0.pose == .alert }
+        Self.apply(raisedForAttention ? .alwaysOnTop : placement, to: window)
+    }
+
     func apply(_ new: Layout) {
         let diff = LayoutDiffer.diff(from: layout, to: new)
         layout = new
+        if layout.cats.contains(where: { $0.pose == .alert }) != raisedForAttention {
+            applyEffectivePlacement()
+        }
         guard !diff.isEmpty else { return }
 
         CATransaction.begin()
